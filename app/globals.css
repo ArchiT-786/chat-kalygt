@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-950 text-slate-50;
+}
+
+.chat-layout {
+  @apply flex flex-col h-screen max-w-5xl mx-auto;
+}
+
+.chat-header {
+  @apply flex items-center justify-between py-4 border-b border-slate-800;
+}
+
+.chat-title {
+  @apply text-lg font-semibold tracking-tight;
+}
+
+.chat-main {
+  @apply flex-1 overflow-y-auto py-4 space-y-4;
+}
+
+.chat-footer {
+  @apply border-t border-slate-800 pt-3 pb-4;
+}
+
+.message {
+  @apply flex gap-3;
+}
+
+.message-avatar {
+  @apply w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold;
+}
+
+.message-user .message-avatar {
+  @apply bg-emerald-500 text-black;
+}
+
+.message-assistant .message-avatar {
+  @apply bg-slate-700 text-slate-100;
+}
+
+.message-bubble {
+  @apply rounded-2xl px-4 py-3 text-sm leading-6 bg-slate-800 text-slate-100;
+}
+
+.message-user .message-bubble {
+  @apply bg-emerald-500/10 text-emerald-50 border border-emerald-700/60;
+}
+
+textarea.chat-input {
+  @apply w-full resize-none bg-slate-900 text-slate-50 rounded-xl border border-slate-700 px-3 py-2 text-sm 
+         focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:border-emerald-500;
+}
+
+button.chat-send {
+  @apply inline-flex items-center justify-center px-3 py-2 rounded-xl text-sm font-medium 
+         bg-emerald-500 hover:bg-emerald-400 text-black disabled:opacity-60 disabled:cursor-not-allowed;
+}
+
+.model-pill {
+  @apply inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-xs text-slate-300 border border-slate-700;
+}
+@layer base {
+  .font-kalyuugh {
+    font-family: var(--font-kalyuugh), "Inter", "Figtree", "Helvetica Neue", Arial, sans-serif;
+  }
+}
