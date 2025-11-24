@@ -15,14 +15,14 @@ export default function LandingPage() {
     <div className="min-h-screen bg-gradient-to-b from-[#faf4ef] via-[#f7f0e8] to-[#f3ece3] text-slate-800 relative overflow-hidden flex flex-col items-center px-6 pt-20 pb-16">
 
       {/* SOFT MANDALA BACKDROP */}
-      <motion.img
+      {/* <motion.img
         src="/chapter_3.png"
         alt="mandala"
         initial={{ opacity: 0, scale: 1.05 }}
         animate={{ opacity: 0.08, scale: 1 }}
         transition={{ duration: 3 }}
         className="absolute inset-0 w-[90%] max-w-[900px] m-auto pointer-events-none"
-      />
+      /> */}
 
       {/* SANSKRIT DECOR */}
       <motion.div
@@ -114,6 +114,31 @@ export default function LandingPage() {
           ENTER INTO THE EXISTENCE
         </Link>
       </motion.div>
+      <section className="max-w-3xl mx-auto mt-16 text-center text-[#7c6450]">
+        <h2 className="text-xl font-semibold mb-4">About Kalyuugh</h2>
+        <p className="text-sm leading-relaxed">
+          Kalyuugh is a spiritual AI oracle inspired by Hindu philosophy, Vedic
+          wisdom, and mythological metaphors. It helps seekers explore karma,
+          paap (sins), dharma, self-reflection, and their inner spiritual truth.
+        </p>
+
+        <h2 className="text-xl font-semibold mt-10 mb-4">What Does Kalyuugh Do?</h2>
+        <ul className="text-sm leading-relaxed list-disc list-inside text-left mx-auto max-w-md">
+          <li>Analyzes your actions using karmic and mythological frameworks.</li>
+          <li>Helps you understand paap, punya, and dharma.</li>
+          <li>Uses stories from Hindu epics as metaphors for spiritual growth.</li>
+          <li>Encourages reflection, not judgment.</li>
+          <li>Supports multiple languages for global seekers.</li>
+        </ul>
+
+        <h2 className="text-xl font-semibold mt-10 mb-4">
+          Who Is Kalyuugh For?
+        </h2>
+        <p className="text-sm leading-relaxed">
+          Anyone seeking inner clarity, moral direction, spiritual understanding,
+          or a deeper connection to their karmic journey.
+        </p>
+      </section>
     </div>
   );
 }

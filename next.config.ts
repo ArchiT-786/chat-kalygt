@@ -1,7 +1,11 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  /* config options here */
+const nextConfig = {
+  compress: true,
+  images: {
+    formats: ["image/avif", "image/webp"],
+  },
+  poweredByHeader: false,
 };
 
-export default nextConfig;
+module.exports = nextConfig;
