@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { pineconeIndex } from "@/lib/pinecone";
 import { embedText } from "@/lib/embed";
 
-export const runtime = "edge";
+// export const runtime = "edge";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -174,7 +174,7 @@ META
   let accumulatedResponse = "";
 
   const stream = await client.chat.completions.create({
-    model: "gpt-5.1-chat-latest",
+    model: "gpt-4.1-mini",
     messages: finalMessages,
     stream: true,
   });
