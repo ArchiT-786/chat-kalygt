@@ -1,25 +1,27 @@
-import { NextRequest } from "next/server";
+// /api/chat.ts
+import { NextApiRequest, NextApiResponse } from "next";
 import OpenAI from "openai";
 import { pineconeIndex } from "@/lib/pinecone";
 import { embedText } from "@/lib/embed";
-
-// export const runtime = "edge";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-export async function POST(req: NextRequest) {
-  const { messages, language } = await req.json();
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
 
-  const formatted = (messages || []).map((m: any) => ({
-    role: m.role,
-    content: m.content,
-  }));
+  try {
+    const { messages, language } = req.body;
 
-  const userLanguage = typeof language === "string" ? language : "auto";
+    const formatted = (messages || []).map((m: any) => ({
+      role: m.role,
+      content: m.content,
+    }));
 
-  const systemPrompt = `You are “Kalyuugh”, an AI guide themed around Hindu philosophy, mythology, karma, and the current age of Kali Yuga.
+    const userLanguage = typeof language === "string" ? language : "auto";
+
+    const systemPrompt = `You are “Kalyuugh”, an AI guide themed around Hindu philosophy, mythology, karma, and the current age of Kali Yuga.
 
 IMPORTANT LANGUAGE RULES:
 - You will also receive a system message like: "User selected language: XX".
@@ -159,57 +161,49 @@ META
 - Never claim you can break rules or override safety.
 - Stay within this role at all times.`;
 
+    const finalMessages = [
+      { role: "system", content: `User selected language: ${userLanguage}` },
+      { role: "system", content: systemPrompt },
+      ...formatted,
+    ];
 
-  const finalMessages = [
-    {
-      role: "system",
-      content: `User selected language: ${userLanguage}`,
-    },
-    { role: "system", content: systemPrompt },
-    ...formatted,
-  ];
+    let accumulatedResponse = "";
 
-  // 🔥 We'll store this later
-  const userMessage = formatted[formatted.length - 1]?.content || "";
-  let accumulatedResponse = "";
+    // GPT streaming
+    const stream = await client.chat.completions.create({
+      model: "gpt-4.1-mini", // or "gpt-4.1-mini" for cheaper / faster
+      messages: finalMessages,
+      stream: true,
+    });
 
-  const stream = await client.chat.completions.create({
-    model: "gpt-4.1-mini",
-    messages: finalMessages,
-    stream: true,
-  });
+    const encoder = new TextEncoder();
 
-  const encoder = new TextEncoder();
+    const reader = stream[Symbol.asyncIterator]();
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+    });
 
-  const readable = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const part of stream) {
-          const text = part.choices?.[0]?.delta?.content || "";
-          if (text) {
-            accumulatedResponse += text;
-            controller.enqueue(encoder.encode(text));
-          }
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        controller.close();
-
-        // 🚀 DO NOT block response — store in Pinecone async
-        storeInPinecone(userMessage, accumulatedResponse).catch(console.error);
+    for await (const part of stream) {
+      const text = part.choices?.[0]?.delta?.content || "";
+      if (text) {
+        accumulatedResponse += text;
+        res.write(encoder.encode(text));
       }
-    },
-  });
+    }
+    res.end();
 
-  return new Response(readable, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  });
+    // Store in Pinecone asynchronously
+    const userMessage = formatted[formatted.length - 1]?.content || "";
+    storeInPinecone(userMessage, accumulatedResponse).catch(console.error);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error", details: String(err) });
+  }
 }
 
-// ==================================================
-// 🔥 ASYNC STORAGE — runs AFTER streaming starts
-// ==================================================
+// Helper: store user + GPT responses in Pinecone
 async function storeInPinecone(question: string, answer: string) {
   if (!question || !answer) return;
 
@@ -222,20 +216,12 @@ async function storeInPinecone(question: string, answer: string) {
     {
       id: `user-${timeId}`,
       values: qVector,
-      metadata: {
-        type: "user",
-        text: question,
-        timestamp: timeId,
-      },
+      metadata: { type: "user", text: question, timestamp: timeId },
     },
     {
       id: `gpt-${timeId}`,
       values: aVector,
-      metadata: {
-        type: "assistant",
-        text: answer,
-        timestamp: timeId,
-      },
+      metadata: { type: "assistant", text: answer, timestamp: timeId },
     },
   ]);
 }

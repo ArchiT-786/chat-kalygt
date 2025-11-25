@@ -1,27 +1,27 @@
-import { NextRequest, NextResponse } from "next/server";
+// /api/search.ts
+import { NextApiRequest, NextApiResponse } from "next";
 import { pineconeIndex } from "@/lib/pinecone";
 import { embedText } from "@/lib/embed";
 
-export async function POST(req: NextRequest) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
+
   try {
-    const { query } = await req.json();
+    const { query } = req.body;
     if (!query || typeof query !== "string") {
-      return NextResponse.json({ error: "Invalid query" }, { status: 400 });
+      return res.status(400).json({ error: "Invalid query" });
     }
 
     const vector = await embedText(query);
-
-    const nsIndex = pineconeIndex.namespace("chat");
-
     const result = await pineconeIndex.query({
       vector,
       topK: 5,
       includeMetadata: true,
     });
 
-    return NextResponse.json(result.matches);
-  } catch (error) {
-    console.error("Pinecone search error:", error);
-    return NextResponse.json({ error: "Failed to search", details: String(error) }, { status: 500 });
+    res.status(200).json(result.matches);
+  } catch (err) {
+    console.error("Pinecone search error:", err);
+    res.status(500).json({ error: "Failed to search", details: String(err) });
   }
 }
