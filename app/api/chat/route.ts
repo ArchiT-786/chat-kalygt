@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
+import { pineconeIndex } from "@/lib/pinecone";
+import { embedText } from "@/lib/embed";
 
 export const runtime = "edge";
 
@@ -157,6 +159,7 @@ META
 - Never claim you can break rules or override safety.
 - Stay within this role at all times.`;
 
+
   const finalMessages = [
     {
       role: "system",
@@ -166,8 +169,12 @@ META
     ...formatted,
   ];
 
+  // 🔥 We'll store this later
+  const userMessage = formatted[formatted.length - 1]?.content || "";
+  let accumulatedResponse = "";
+
   const stream = await client.chat.completions.create({
-    model: "gpt-5.1-chat-latest", // or "gpt-4.1-mini" if you prefer
+    model: "gpt-5.1-chat-latest",
     messages: finalMessages,
     stream: true,
   });
@@ -178,20 +185,57 @@ META
     async start(controller) {
       try {
         for await (const part of stream) {
-          const text = part.choices[0]?.delta?.content || "";
-          if (text) controller.enqueue(encoder.encode(text));
+          const text = part.choices?.[0]?.delta?.content || "";
+          if (text) {
+            accumulatedResponse += text;
+            controller.enqueue(encoder.encode(text));
+          }
         }
-      } catch (err) {
-        controller.error(err);
+      } catch (e) {
+        console.error(e);
       } finally {
         controller.close();
+
+        // 🚀 DO NOT block response — store in Pinecone async
+        storeInPinecone(userMessage, accumulatedResponse).catch(console.error);
       }
     },
   });
 
   return new Response(readable, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-    },
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
+}
+
+// ==================================================
+// 🔥 ASYNC STORAGE — runs AFTER streaming starts
+// ==================================================
+async function storeInPinecone(question: string, answer: string) {
+  if (!question || !answer) return;
+
+  const qVector = await embedText(question);
+  const aVector = await embedText(answer);
+
+  const timeId = Date.now().toString();
+
+  await pineconeIndex.upsert([
+    {
+      id: `user-${timeId}`,
+      values: qVector,
+      metadata: {
+        type: "user",
+        text: question,
+        timestamp: timeId,
+      },
+    },
+    {
+      id: `gpt-${timeId}`,
+      values: aVector,
+      metadata: {
+        type: "assistant",
+        text: answer,
+        timestamp: timeId,
+      },
+    },
+  ]);
 }
