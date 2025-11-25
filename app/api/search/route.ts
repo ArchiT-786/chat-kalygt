@@ -1,15 +1,18 @@
-// /api/search.ts
-import { NextApiRequest, NextApiResponse } from "next";
+// /app/api/search/route.ts
+import { NextRequest } from "next/server";
 import { pineconeIndex } from "@/lib/pinecone";
 import { embedText } from "@/lib/embed";
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
+export const runtime = "nodejs"; // ensures Serverless Node runtime
 
+export async function POST(req: NextRequest) {
   try {
-    const { query } = req.body;
+    const { query } = await req.json();
     if (!query || typeof query !== "string") {
-      return res.status(400).json({ error: "Invalid query" });
+      return new Response(JSON.stringify({ error: "Invalid query" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const vector = await embedText(query);
@@ -19,9 +22,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       includeMetadata: true,
     });
 
-    res.status(200).json(result.matches);
+    return new Response(JSON.stringify(result.matches), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (err) {
     console.error("Pinecone search error:", err);
-    res.status(500).json({ error: "Failed to search", details: String(err) });
+    return new Response(JSON.stringify({ error: "Failed to search" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }
