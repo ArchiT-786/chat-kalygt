@@ -1,18 +1,13 @@
-// /api/chat.ts
-import { NextApiRequest, NextApiResponse } from "next";
+import { NextRequest } from "next/server";
 import OpenAI from "openai";
 import { pineconeIndex } from "@/lib/pinecone";
 import { embedText } from "@/lib/embed";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+export const runtime = "nodejs"; // ensures Serverless Node runtime
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
-
+export async function POST(req: NextRequest) {
   try {
-    const { messages, language } = req.body;
+    const { messages, language } = await req.json();
 
     const formatted = (messages || []).map((m: any) => ({
       role: m.role,
@@ -169,41 +164,48 @@ META
 
     let accumulatedResponse = "";
 
-    // GPT streaming
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+
     const stream = await client.chat.completions.create({
-      model: "gpt-4.1-mini", // or "gpt-4.1-mini" for cheaper / faster
+      model: "gpt-4.1",
       messages: finalMessages,
       stream: true,
     });
 
     const encoder = new TextEncoder();
 
-    const reader = stream[Symbol.asyncIterator]();
-    res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Transfer-Encoding": "chunked",
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const part of stream) {
+            const text = part.choices?.[0]?.delta?.content || "";
+            if (text) {
+              accumulatedResponse += text;
+              controller.enqueue(encoder.encode(text));
+            }
+          }
+        } catch (e) {
+          controller.error(e);
+        } finally {
+          controller.close();
+
+          // Store in Pinecone asynchronously
+          const userMessage = formatted[formatted.length - 1]?.content || "";
+          storeInPinecone(userMessage, accumulatedResponse).catch(console.error);
+        }
+      },
     });
 
-    for await (const part of stream) {
-      const text = part.choices?.[0]?.delta?.content || "";
-      if (text) {
-        accumulatedResponse += text;
-        res.write(encoder.encode(text));
-      }
-    }
-    res.end();
-
-    // Store in Pinecone asynchronously
-    const userMessage = formatted[formatted.length - 1]?.content || "";
-    storeInPinecone(userMessage, accumulatedResponse).catch(console.error);
-
+    return new Response(readable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Internal server error", details: String(err) });
+    return new Response("Internal server error", { status: 500 });
   }
 }
 
-// Helper: store user + GPT responses in Pinecone
+// Store user + GPT responses in Pinecone
 async function storeInPinecone(question: string, answer: string) {
   if (!question || !answer) return;
 
