@@ -128,6 +128,8 @@ export default function KalyuughChat() {
       { id: assistantId, role: "assistant", content: "" },
     ]);
 
+    let assistantFullResponse = "";
+
     const res = await fetch("/api/chat", {
       method: "POST",
       body: JSON.stringify({
@@ -147,12 +149,24 @@ export default function KalyuughChat() {
       const chunk = decoder.decode(value || new Uint8Array());
       if (!chunk) continue;
 
+      assistantFullResponse += chunk; // Track full answer
+
       setMessages(prev =>
         prev.map(m =>
           m.id === assistantId ? { ...m, content: m.content + chunk } : m
         )
       );
     }
+
+    // 🚀 Store to Pinecone AFTER streaming
+    fetch("/api/store-chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: userMessage.content,
+        answer: assistantFullResponse,
+      }),
+    }).catch(err => console.error("Failed storing chat:", err));
 
     reFocus();
   }
@@ -317,11 +331,10 @@ function ChatBubble({ msg }: { msg: Message }) {
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-          isUser
+        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${isUser
             ? "bg-white border border-[#e0d3c5] text-[#4b3a2c]"
             : "bg-[#fbf1e4] border border-[#e1c8aa] text-[#4b3522]"
-        }`}
+          }`}
       >
         {msg.content}
       </motion.div>

@@ -1,15 +1,13 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
-import { pineconeIndex } from "@/lib/pinecone";
-import { embedText } from "@/lib/embed";
 
-export const runtime = "nodejs"; // ensures Serverless Node runtime
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
     const { messages, language } = await req.json();
 
-    const formatted = (messages || []).map((m: any) => ({
+    const formatted = messages.map((m: any) => ({
       role: m.role,
       content: m.content,
     }));
@@ -156,16 +154,17 @@ META
 - Never claim you can break rules or override safety.
 - Stay within this role at all times.`;
 
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+
+    let fullResponse = "";
+
     const finalMessages = [
       { role: "system", content: `User selected language: ${userLanguage}` },
       { role: "system", content: systemPrompt },
       ...formatted,
     ];
 
-    let accumulatedResponse = "";
-
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-
+    /* ===================== STREAM FROM OPENAI ===================== */
     const stream = await client.chat.completions.create({
       model: "gpt-4.1",
       messages: finalMessages,
@@ -180,50 +179,47 @@ META
           for await (const part of stream) {
             const text = part.choices?.[0]?.delta?.content || "";
             if (text) {
-              accumulatedResponse += text;
+              fullResponse += text;
               controller.enqueue(encoder.encode(text));
             }
           }
-        } catch (e) {
-          controller.error(e);
+        } catch (err) {
+          console.error("❌ Streaming error:", err);
+          controller.error(err);
         } finally {
           controller.close();
 
-          // Store in Pinecone asynchronously
-          const userMessage = formatted[formatted.length - 1]?.content || "";
-          storeInPinecone(userMessage, accumulatedResponse).catch(console.error);
+          /* ========================================================
+              BACKGROUND ASYNC STORAGE (IMPORTANT!)
+             ======================================================== */
+          const lastUserMessage = formatted[formatted.length - 1]?.content;
+
+          if (!process.env.NEXTAUTH_URL) {
+            console.error("❌ Missing NEXTAUTH_URL");
+            return;
+          }
+
+          fetch(`${process.env.NEXTAUTH_URL}/api/store-chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question: lastUserMessage,
+              answer: fullResponse,
+            }),
+          }).catch((e) =>
+            console.error("❌ Background store failed:", e)
+          );
         }
       },
     });
 
     return new Response(readable, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+      },
     });
   } catch (err) {
-    console.error(err);
-    return new Response("Internal server error", { status: 500 });
+    console.error("❌ Chat API error:", err);
+    return new Response("Internal error", { status: 500 });
   }
-}
-
-// Store user + GPT responses in Pinecone
-async function storeInPinecone(question: string, answer: string) {
-  if (!question || !answer) return;
-
-  const qVector = await embedText(question);
-  const aVector = await embedText(answer);
-
-  const timeId = Date.now().toString();
-
-  await pineconeIndex.upsert([
-    {
-      id: `user-${timeId}`,
-      values: qVector,
-      metadata: { type: "user", text: question, timestamp: timeId },
-    },
-    {
-      id: `gpt-${timeId}`,
-      values: aVector,
-      metadata: { type: "assistant", text: answer, timestamp: timeId },
-    },
-  ]);
 }
