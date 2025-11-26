@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRef } from "react";
+import MotionButton from '@/components/MotionButton';
 
 export default function LandingPage() {
   const buttonRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +115,7 @@ export default function LandingPage() {
           ENTER INTO THE EXISTENCE
         </Link>
       </motion.div>
+      <MotionButton/>
       <section className="max-w-3xl mx-auto mt-16 text-center text-[#7c6450]">
         <h2 className="text-xl font-semibold mb-4">About Kalyuugh</h2>
         <p className="text-sm leading-relaxed">
