@@ -3,376 +3,315 @@
 import { useState, useEffect, useRef } from "react";
 import { nanoid } from "nanoid";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send } from "lucide-react";
+import { Send, Plus, Trash2, Edit3, MessagesSquare } from "lucide-react";
 
-/* ==========================================================
-   TYPES
-========================================================== */
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
+import { chatStore } from "@/lib/chatStore";
+import { ChatMessage } from "@/lib/db";
 
-type LanguageOption = {
-  code: string;
-  label: string;
-  native: string;
-};
-
-/* ==========================================================
-   LANGUAGE LIST
-========================================================== */
-const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: "auto", label: "Auto-detect", native: "🌐 Auto" },
-  { code: "en", label: "English", native: "English" },
-  { code: "hi", label: "Hindi", native: "हिन्दी" },
-  { code: "bn", label: "Bengali", native: "বাংলা" },
-  { code: "es", label: "Spanish", native: "Español" },
-  { code: "fr", label: "French", native: "Français" },
-  { code: "de", label: "German", native: "Deutsch" },
-  { code: "ru", label: "Russian", native: "Русский" },
-  { code: "pt", label: "Portuguese", native: "Português" },
-  { code: "ar", label: "Arabic", native: "العربية" },
-  { code: "zh", label: "Chinese", native: "中文" },
-  { code: "ja", label: "Japanese", native: "日本語" },
-  { code: "ko", label: "Korean", native: "한국어" },
-  { code: "gu", label: "Gujarati", native: "ગુજરાતી" },
-  { code: "mr", label: "Marathi", native: "मराठी" },
-  { code: "ta", label: "Tamil", native: "தமிழ்" },
-  { code: "te", label: "Telugu", native: "తెలుగు" },
-  { code: "kn", label: "Kannada", native: "ಕನ್ನಡ" },
-  { code: "ml", label: "Malayalam", native: "മലയാളം" },
-  { code: "pa", label: "Punjabi", native: "ਪੰਜਾਬੀ" },
-  { code: "ur", label: "Urdu", native: "اردو" },
-];
-
-/* ==========================================================
-   MAIN COMPONENT
-========================================================== */
-export default function KalyuughChat() {
-  /* ---------------------------------------------
-     STATE
-  --------------------------------------------- */
-  const [messages, setMessages] = useState<Message[]>([]);
+/* =======================================================
+   MAIN CHAT PAGE WITH MULTI-CHAT SUPPORT
+======================================================= */
+export default function KalyuughChatPage() {
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [language, setLanguage] = useState("auto");
-  const [showMenu, setShowMenu] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  const [conversationId, setConversationId] = useState<string>(() => {
-    return localStorage.getItem("kalyuugh_conversationId") || nanoid();
-  });
-
-  const isSendingRef = useRef<boolean>(false); // prevent duplicate calls
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  /* ==========================================================
-     LOAD persisted messages/language on first mount
-  ========================================================== */
+  /* =======================================================
+     LOAD ALL CONVERSATIONS
+  ======================================================== */
   useEffect(() => {
-    const savedMsgs = localStorage.getItem("kalyuugh_messages");
-    const savedLang = localStorage.getItem("kalyuugh_language");
-    const savedConvId = localStorage.getItem("kalyuugh_conversationId");
+    chatStore.listConversations().then((convs) => {
+      setConversations(convs);
 
-    if (savedConvId) setConversationId(savedConvId);
+      // Auto-load the first conversation or create one
+      if (convs.length > 0) {
+        setCurrentConversationId(convs[0].id);
+      } else {
+        createNewConversation();
+      }
+    });
+  }, []);
 
-    if (savedMsgs) {
-      setMessages(JSON.parse(savedMsgs));
-    } else {
-      setMessages([
-        {
+  /* =======================================================
+     LOAD MESSAGES FOR CURRENT CONVERSATION
+  ======================================================== */
+  useEffect(() => {
+    if (!currentConversationId) return;
+
+    chatStore.getMessages(currentConversationId).then((msgs) => {
+      if (msgs.length === 0) {
+        const firstMsg: ChatMessage = {
           id: nanoid(),
           role: "assistant",
           content:
-            "🌸 **Welcome, seeker.** I am the Oracle of Kalyuugh. What karma or truth weighs on your heart today?",
-        },
-      ]);
-    }
+            "🌸 **Welcome, seeker.** What truth weighs upon your heart today?",
+          createdAt: Date.now(),
+          conversationId: currentConversationId,
+        };
+        setMessages([firstMsg]);
+        chatStore.addMessage(firstMsg);
+      } else {
+        setMessages(msgs);
+      }
+    });
+  }, [currentConversationId]);
 
-    if (savedLang) setLanguage(savedLang);
-  }, []);
-
-  /* ==========================================================
-     SAVE messages + language + conversationId to local storage
-  ========================================================== */
-  useEffect(() => {
-    localStorage.setItem("kalyuugh_messages", JSON.stringify(messages));
-  }, [messages]);
-
-  useEffect(() => {
-    localStorage.setItem("kalyuugh_language", language);
-  }, [language]);
-
-  useEffect(() => {
-    localStorage.setItem("kalyuugh_conversationId", conversationId);
-  }, [conversationId]);
-
-  /* ==========================================================
-     CHECK AUTH STATUS
-  ========================================================== */
-  useEffect(() => {
-    fetch("/api/auth-status")
-      .then(res => res.json())
-      .then(data => setIsLoggedIn(!!data.isLoggedIn))
-      .catch(() => setIsLoggedIn(false));
-  }, []);
-
-  /* ==========================================================
-     AUTO-SCROLL
-  ========================================================== */
+  /* =======================================================
+     SCROLL TO BOTTOM
+  ======================================================== */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const reFocus = () => setTimeout(() => inputRef.current?.focus(), 80);
+  /* =======================================================
+     CREATE NEW CONVERSATION
+  ======================================================== */
+  async function createNewConversation() {
+    const conv = await chatStore.createConversation("New Conversation");
+    setConversations((prev) => [conv, ...prev]);
+    setCurrentConversationId(conv.id);
+  }
 
-  /* ==========================================================
-     SEND MESSAGE (streaming, deduped, latest-message only)
-  ========================================================== */
+  /* =======================================================
+     SEND MESSAGE
+  ======================================================== */
   async function sendMessage() {
-    if (!input.trim()) return;
-    if (isSendingRef.current) return; // lock to prevent duplicates
+    if (!input.trim() || !currentConversationId) return;
 
-    isSendingRef.current = true;
-
-    const userMessage: Message = {
+    const userMsg: ChatMessage = {
       id: nanoid(),
       role: "user",
       content: input.trim(),
+      createdAt: Date.now(),
+      conversationId: currentConversationId,
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMsg]);
+    chatStore.addMessage(userMsg);
     setInput("");
 
-    // Prepare assistant placeholder
+    // Create assistant placeholder
     const assistantId = nanoid();
-    setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "" }]);
-
-    let assistantFullResponse = "";
-
-    // Abort controller (cancel previous streaming if exists)
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = new AbortController();
-
-    /* ==========================================================
-       ONLY SEND THE LATEST USER MESSAGE
-       THIS SAVES TOKEN COSTS + PREVENTS DUPLICATE HISTORY
-    ========================================================== */
-    const payload = {
-      messages: [
-        { role: "user", content: userMessage.content }
-      ],
-      language,
-      conversationId
+    const placeholder: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      createdAt: Date.now(),
+      conversationId: currentConversationId,
     };
+    setMessages((prev) => [...prev, placeholder]);
+
+    let fullResponse = "";
 
     const res = await fetch("/api/chat", {
       method: "POST",
-      body: JSON.stringify(payload),
-      signal: abortControllerRef.current.signal
-    }).catch(err => console.error(err));
+      body: JSON.stringify({
+        messages: [{ role: "user", content: userMsg.content }], // only latest msg
+        language,
+        conversationId: currentConversationId,
+      }),
+    });
 
-    if (!res || !res.body) {
-      isSendingRef.current = false;
-      return;
-    }
-
-    const reader = res.body.getReader();
+    const reader = res.body!.getReader();
     const decoder = new TextDecoder();
 
-    /* ==========================================================
-       STREAM THE RESPONSE
-    ========================================================== */
     while (true) {
-      const { value, done } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value || new Uint8Array());
-      if (!chunk) continue;
+      const chunk = decoder.decode(value);
+      fullResponse += chunk;
 
-      assistantFullResponse += chunk;
-
-      setMessages(prev =>
-        prev.map(m =>
+      setMessages((prev) =>
+        prev.map((m) =>
           m.id === assistantId ? { ...m, content: m.content + chunk } : m
         )
       );
     }
 
-    reFocus();
+    // Store final assistant message
+    chatStore.addMessage({
+      id: assistantId,
+      role: "assistant",
+      content: fullResponse,
+      createdAt: Date.now(),
+      conversationId: currentConversationId,
+    });
+
+    // Store to Pinecone (mapped)
+    // fetch("/api/store-chat", {
+    //   method: "POST",
+    //   body: JSON.stringify({
+    //     question: userMsg.content,
+    //     answer: fullResponse,
+    //     conversationId: currentConversationId,
+    //   }),
+    // });
   }
 
-  /* ==========================================================
-     NEW CHAT
-  ========================================================== */
-  const newChat = () => {
-    const first: Message = {
-      id: nanoid(),
-      role: "assistant",
-      content:
-        "🌸 **A new beginning unfolds…** What truth do you wish to explore this time, seeker?",
-    };
+  /* =======================================================
+     RENAME CURRENT CONVERSATION
+  ======================================================== */
+  function startRename() {
+    const conv = conversations.find((c) => c.id === currentConversationId);
+    if (!conv) return;
+    setNewTitle(conv.title);
+    setEditingTitle(true);
+  }
 
-    setConversationId(nanoid());
-    localStorage.setItem("kalyuugh_conversationId", conversationId);
+  async function finishRename() {
+    if (!currentConversationId) return;
+    await chatStore.renameConversation(currentConversationId, newTitle);
+    setEditingTitle(false);
+    setConversations(await chatStore.listConversations());
+  }
 
-    setMessages([first]);
-    localStorage.removeItem("kalyuugh_messages");
-    setShowMenu(false);
-  };
+  /* =======================================================
+     DELETE CONVERSATION
+  ======================================================== */
+  async function deleteConversation(id: string) {
+    await chatStore.deleteConversation(id);
 
-  /* ==========================================================
-     UPLOAD HANDLER (placeholder)
-  ========================================================== */
-  const handleUploadClick = () => {
-    alert("Upload image flow goes here.");
-    setShowMenu(false);
-  };
+    const newList = await chatStore.listConversations();
+    setConversations(newList);
 
-  /* ==========================================================
-     UI
-  ========================================================== */
+    if (newList.length > 0) {
+      setCurrentConversationId(newList[0].id);
+    } else {
+      createNewConversation();
+    }
+  }
+
+  /* =======================================================
+     UI RENDER
+  ======================================================== */
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#faf4ef] via-[#f7f0e8] to-[#f3ece3] text-slate-800 flex flex-col">
-      {/* HEADER */}
-      <header className="w-full border-b border-[#e4d6c6] bg-[#fdf7f0]/80 backdrop-blur-sm">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          {/* TITLE */}
-          <div className="flex items-center gap-3">
-            <motion.div
-              animate={{ y: [0, -2, 0] }}
-              transition={{ duration: 4, repeat: Infinity }}
-              className="h-10 w-10 rounded-full bg-gradient-to-br from-[#f6d4c8] to-[#e7c9a8] flex items-center justify-center text-xl font-semibold text-[#5a3a2b]"
-            >
-              क
-            </motion.div>
-            <div>
-              <h1 className="text-base font-semibold text-[#5a3a2b] tracking-tight">
-                Oracle of Kalyuugh
-              </h1>
-              <p className="text-xs text-[#8f6f5a]">
-                A gentle space for karma, paap & dharma.
-              </p>
-            </div>
-          </div>
+    <div className="flex min-h-screen bg-[#f7f0e8]">
+      {/* ============================ SIDEBAR ============================= */}
+      <aside className="w-64 border-r border-[#e4d6c6] bg-[#faf4ef] p-4 flex flex-col gap-4">
 
-          {/* LANGUAGE SWITCH */}
-          <div className="flex flex-col items-end gap-1">
-            <label className="text-[10px] uppercase tracking-wide text-[#9b816f]">
-              Language
-            </label>
-            <select
-              value={language}
-              onChange={e => setLanguage(e.target.value)}
-              className="bg-white border border-[#e2d3c3] px-2 py-1 rounded-md text-xs text-[#5a3a2b] shadow-sm"
+        <button
+          onClick={createNewConversation}
+          className="flex items-center gap-2 px-3 py-2 bg-[#e7c9a8] hover:bg-[#d9b592] text-[#5a3a2b] rounded-md shadow-sm"
+        >
+          <Plus size={16} />
+          New Chat
+        </button>
+
+        <div className="flex flex-col gap-2 overflow-y-auto">
+          {conversations.map((c) => (
+            <div
+              key={c.id}
+              onClick={() => setCurrentConversationId(c.id)}
+              className={`p-3 rounded-lg cursor-pointer flex justify-between items-center hover:bg-[#f4e8db] ${
+                currentConversationId === c.id
+                  ? "bg-[#f4e8db] border border-[#d4b489]"
+                  : "border border-transparent"
+              }`}
             >
-              {LANGUAGE_OPTIONS.map(lang => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.native} — {lang.label}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="flex items-center gap-2">
+                <MessagesSquare size={14} className="text-[#5a3a2b]" />
+                <span className="text-sm text-[#5a3a2b]">{c.title}</span>
+              </div>
+
+              <div className="flex gap-2">
+                <Edit3
+                  size={14}
+                  className="text-[#5a3a2b] cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentConversationId(c.id);
+                    startRename();
+                  }}
+                />
+
+                <Trash2
+                  size={14}
+                  className="text-red-500 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteConversation(c.id);
+                  }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
-      </header>
+      </aside>
 
-      {/* CHAT AREA */}
-      <main className="flex-1 flex justify-center px-3 py-4">
-        <div className="w-full max-w-3xl bg-[#fefaf5] border border-[#e4d6c6] rounded-2xl shadow-sm flex flex-col overflow-hidden">
-          
-          {/* MESSAGES */}
-          <div className="flex-1 px-4 pt-4 pb-2 space-y-4 overflow-y-auto">
-            {messages.map(m => (
-              <ChatBubble key={m.id} msg={m} />
-            ))}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* INPUT AREA */}
-          <div className="h-px bg-gradient-to-r from-transparent via-[#e4d6c6] to-transparent" />
-
-          <div className="px-4 py-3 flex items-end gap-3 bg-[#fdf7f0] relative">
-
-            {/* MENU */}
-            <div className="relative">
+      {/* ============================ CHAT AREA ============================ */}
+      <main className="flex-1 flex flex-col">
+        {/* HEADER TITLE */}
+        <header className="p-4 border-b border-[#e4d6c6] bg-[#fdf7f0] flex justify-between">
+          {editingTitle ? (
+            <div className="flex gap-2">
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                className="px-2 py-1 border rounded-md text-sm"
+              />
               <button
-                onClick={() => setShowMenu(prev => !prev)}
-                className="h-10 w-10 rounded-full bg-white border border-[#e2d3c3] flex items-center justify-center shadow-sm hover:shadow-md transition"
+                onClick={finishRename}
+                className="px-3 py-1 bg-[#e7c9a8] rounded-md text-[#5a3a2b]"
               >
-                <span className="text-[#5a3a2b] text-xl leading-none">+</span>
+                Save
               </button>
-
-              <AnimatePresence>
-                {showMenu && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    transition={{ duration: 0.18 }}
-                    className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col bg-white border border-[#e2d3c3] rounded-xl shadow-md px-2 py-2 min-w-[140px]"
-                  >
-                    {isLoggedIn && (
-                      <button
-                        onClick={handleUploadClick}
-                        className="text-xs text-left text-[#5a3a2b] px-2 py-1.5 rounded-lg hover:bg-[#f5ebe0] transition"
-                      >
-                        Upload Image
-                      </button>
-                    )}
-
-                    <button
-                      onClick={newChat}
-                      className="text-xs text-left text-[#5a3a2b] px-2 py-1.5 rounded-lg hover:bg-[#f5ebe0] transition"
-                    >
-                      New Chat
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
+          ) : (
+            <h1 className="text-lg text-[#5a3a2b] font-semibold">
+              {conversations.find((c) => c.id === currentConversationId)?.title}
+            </h1>
+          )}
+        </header>
 
-            {/* TEXTAREA */}
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              placeholder="Share your reflections or confessions…"
-              className="flex-1 resize-none bg-white border border-[#e2d3c3] rounded-xl px-3 py-2 text-sm text-[#5a3a2b] placeholder:text-[#b89a84] focus:outline-none focus:ring-1 focus:ring-[#d4b489] max-h-32"
-            />
+        {/* MESSAGES */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#fefaf5]">
+          {messages.map((msg) => (
+            <ChatBubble key={msg.id} msg={msg} />
+          ))}
+          <div ref={bottomRef} />
+        </div>
 
-            {/* SEND BUTTON */}
-            <button
-              onClick={sendMessage}
-              className="h-10 w-10 rounded-full bg-gradient-to-br from-[#e7c9a8] to-[#d9b592] flex items-center justify-center shadow-sm hover:shadow-md transition"
-            >
-              <Send size={16} className="text-[#5a3a2b]" />
-            </button>
-          </div>
+        {/* INPUT BAR */}
+        <div className="p-3 border-t border-[#e4d6c6] bg-[#fdf7f0] flex items-end gap-3">
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            className="flex-1 resize-none bg-white border border-[#e2d3c3] rounded-xl px-3 py-2 text-sm text-[#5a3a2b]"
+            placeholder="Ask the Oracle of Kalyuugh..."
+          />
 
-          <p className="px-4 pb-3 text-[10px] text-[#b39378] text-right">
-            Enter to send • Shift+Enter for new line • Kalyuugh guides gently.
-          </p>
+          <button
+            onClick={sendMessage}
+            className="h-10 w-10 bg-gradient-to-br from-[#e7c9a8] to-[#d9b592] rounded-full flex items-center justify-center"
+          >
+            <Send size={16} className="text-[#5a3a2b]" />
+          </button>
         </div>
       </main>
     </div>
   );
 }
 
-/* ==========================================================
-   CHAT BUBBLE
-========================================================== */
-function ChatBubble({ msg }: { msg: Message }) {
+/* =======================================================
+   CHAT BUBBLE COMPONENT
+======================================================= */
+function ChatBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === "user";
 
   return (
@@ -380,7 +319,7 @@ function ChatBubble({ msg }: { msg: Message }) {
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
           isUser
             ? "bg-white border border-[#e0d3c5] text-[#4b3a2c]"
             : "bg-[#fbf1e4] border border-[#e1c8aa] text-[#4b3522]"
