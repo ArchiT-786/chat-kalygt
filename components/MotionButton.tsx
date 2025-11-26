@@ -1,6 +1,10 @@
 import { motion } from 'framer-motion';
 
-function AnimatedClickHereButton({ onClick }: { onClick: () => void }) {
+interface AnimatedClickHereButtonProps {
+  onClick?: () => void;
+}
+
+export default function AnimatedClickHereButton({ onClick = () => console.log('Button clicked!') }: AnimatedClickHereButtonProps) {
   return (
     <motion.button
       onClick={onClick}
