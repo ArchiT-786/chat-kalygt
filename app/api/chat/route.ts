@@ -173,6 +173,8 @@ META
 
     const encoder = new TextEncoder();
 
+    const lastUserMessage = formatted[formatted.length - 1]?.content;
+
     const readable = new ReadableStream({
       async start(controller) {
         try {
@@ -190,15 +192,8 @@ META
           controller.close();
 
           /* ========================================================
-              BACKGROUND ASYNC STORAGE (IMPORTANT!)
-             ======================================================== */
-          const lastUserMessage = formatted[formatted.length - 1]?.content;
-
-          if (!process.env.NEXTAUTH_URL) {
-            console.error("❌ Missing NEXTAUTH_URL");
-            return;
-          }
-
+              BACKGROUND STORE AFTER STREAM (ONE TIME)
+          ======================================================== */
           fetch(`${process.env.NEXTAUTH_URL}/api/store-chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -206,9 +201,7 @@ META
               question: lastUserMessage,
               answer: fullResponse,
             }),
-          }).catch((e) =>
-            console.error("❌ Background store failed:", e)
-          );
+          }).catch((e) => console.error("❌ Background store failed:", e));
         }
       },
     });

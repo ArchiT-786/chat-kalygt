@@ -5,7 +5,9 @@ import { nanoid } from "nanoid";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send } from "lucide-react";
 
-/* ============== TYPES ============== */
+/* ==========================================================
+   TYPES
+========================================================== */
 type Message = {
   id: string;
   role: "user" | "assistant";
@@ -18,11 +20,11 @@ type LanguageOption = {
   native: string;
 };
 
-/* ============== LANGUAGE LIST (trimmed but extendable) ============== */
+/* ==========================================================
+   LANGUAGE LIST
+========================================================== */
 const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: "auto", label: "Auto-detect", native: "🌐 Auto" },
-
-  // Major languages
   { code: "en", label: "English", native: "English" },
   { code: "hi", label: "Hindi", native: "हिन्दी" },
   { code: "bn", label: "Bengali", native: "বাংলা" },
@@ -35,8 +37,6 @@ const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: "zh", label: "Chinese", native: "中文" },
   { code: "ja", label: "Japanese", native: "日本語" },
   { code: "ko", label: "Korean", native: "한국어" },
-
-  // Indian block
   { code: "gu", label: "Gujarati", native: "ગુજરાતી" },
   { code: "mr", label: "Marathi", native: "मराठी" },
   { code: "ta", label: "Tamil", native: "தமிழ்" },
@@ -47,21 +47,38 @@ const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: "ur", label: "Urdu", native: "اردو" },
 ];
 
-/* ============== PAGE COMPONENT ============== */
+/* ==========================================================
+   MAIN COMPONENT
+========================================================== */
 export default function KalyuughChat() {
+  /* ---------------------------------------------
+     STATE
+  --------------------------------------------- */
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [language, setLanguage] = useState("auto");
   const [showMenu, setShowMenu] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
+  const [conversationId, setConversationId] = useState<string>(() => {
+    return localStorage.getItem("kalyuugh_conversationId") || nanoid();
+  });
+
+  const isSendingRef = useRef<boolean>(false); // prevent duplicate calls
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  /* LOAD MESSAGES + LANGUAGE FROM LOCAL STORAGE */
+  /* ==========================================================
+     LOAD persisted messages/language on first mount
+  ========================================================== */
   useEffect(() => {
     const savedMsgs = localStorage.getItem("kalyuugh_messages");
     const savedLang = localStorage.getItem("kalyuugh_language");
+    const savedConvId = localStorage.getItem("kalyuugh_conversationId");
+
+    if (savedConvId) setConversationId(savedConvId);
 
     if (savedMsgs) {
       setMessages(JSON.parse(savedMsgs));
@@ -71,7 +88,7 @@ export default function KalyuughChat() {
           id: nanoid(),
           role: "assistant",
           content:
-            "🌸 **Welcome, seeker.** I am the Oracle of Kalyuugh. In this calm space, you can reflect on karma, paap, and dharma. What is on your heart today?",
+            "🌸 **Welcome, seeker.** I am the Oracle of Kalyuugh. What karma or truth weighs on your heart today?",
         },
       ]);
     }
@@ -79,6 +96,9 @@ export default function KalyuughChat() {
     if (savedLang) setLanguage(savedLang);
   }, []);
 
+  /* ==========================================================
+     SAVE messages + language + conversationId to local storage
+  ========================================================== */
   useEffect(() => {
     localStorage.setItem("kalyuugh_messages", JSON.stringify(messages));
   }, [messages]);
@@ -87,61 +107,86 @@ export default function KalyuughChat() {
     localStorage.setItem("kalyuugh_language", language);
   }, [language]);
 
-  /* CHECK AUTH STATUS (NextAuth) */
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const res = await fetch("/api/auth-status");
-        if (!res.ok) return;
-        const data = await res.json();
-        setIsLoggedIn(!!data.isLoggedIn);
-      } catch {
-        setIsLoggedIn(false);
-      }
-    };
-    checkAuth();
+    localStorage.setItem("kalyuugh_conversationId", conversationId);
+  }, [conversationId]);
+
+  /* ==========================================================
+     CHECK AUTH STATUS
+  ========================================================== */
+  useEffect(() => {
+    fetch("/api/auth-status")
+      .then(res => res.json())
+      .then(data => setIsLoggedIn(!!data.isLoggedIn))
+      .catch(() => setIsLoggedIn(false));
   }, []);
 
-  /* AUTO SCROLL */
+  /* ==========================================================
+     AUTO-SCROLL
+  ========================================================== */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const reFocus = () => setTimeout(() => inputRef.current?.focus(), 50);
+  const reFocus = () => setTimeout(() => inputRef.current?.focus(), 80);
 
-  /* SEND MESSAGE (STREAMING) */
+  /* ==========================================================
+     SEND MESSAGE (streaming, deduped, latest-message only)
+  ========================================================== */
   async function sendMessage() {
     if (!input.trim()) return;
+    if (isSendingRef.current) return; // lock to prevent duplicates
+
+    isSendingRef.current = true;
 
     const userMessage: Message = {
       id: nanoid(),
       role: "user",
-      content: input,
+      content: input.trim(),
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInput("");
 
+    // Prepare assistant placeholder
     const assistantId = nanoid();
-    setMessages(prev => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "" },
-    ]);
+    setMessages(prev => [...prev, { id: assistantId, role: "assistant", content: "" }]);
 
     let assistantFullResponse = "";
 
+    // Abort controller (cancel previous streaming if exists)
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    /* ==========================================================
+       ONLY SEND THE LATEST USER MESSAGE
+       THIS SAVES TOKEN COSTS + PREVENTS DUPLICATE HISTORY
+    ========================================================== */
+    const payload = {
+      messages: [
+        { role: "user", content: userMessage.content }
+      ],
+      language,
+      conversationId
+    };
+
     const res = await fetch("/api/chat", {
       method: "POST",
-      body: JSON.stringify({
-        messages: [...messages, userMessage],
-        language,
-      }),
-    });
+      body: JSON.stringify(payload),
+      signal: abortControllerRef.current.signal
+    }).catch(err => console.error(err));
 
-    if (!res.body) return;
+    if (!res || !res.body) {
+      isSendingRef.current = false;
+      return;
+    }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
+    /* ==========================================================
+       STREAM THE RESPONSE
+    ========================================================== */
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -149,7 +194,7 @@ export default function KalyuughChat() {
       const chunk = decoder.decode(value || new Uint8Array());
       if (!chunk) continue;
 
-      assistantFullResponse += chunk; // Track full answer
+      assistantFullResponse += chunk;
 
       setMessages(prev =>
         prev.map(m =>
@@ -158,20 +203,12 @@ export default function KalyuughChat() {
       );
     }
 
-    // 🚀 Store to Pinecone AFTER streaming
-    fetch("/api/store-chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: userMessage.content,
-        answer: assistantFullResponse,
-      }),
-    }).catch(err => console.error("Failed storing chat:", err));
-
     reFocus();
   }
 
-  /* NEW CHAT */
+  /* ==========================================================
+     NEW CHAT
+  ========================================================== */
   const newChat = () => {
     const first: Message = {
       id: nanoid(),
@@ -179,24 +216,32 @@ export default function KalyuughChat() {
       content:
         "🌸 **A new beginning unfolds…** What truth do you wish to explore this time, seeker?",
     };
+
+    setConversationId(nanoid());
+    localStorage.setItem("kalyuugh_conversationId", conversationId);
+
     setMessages([first]);
     localStorage.removeItem("kalyuugh_messages");
     setShowMenu(false);
   };
 
-  /* UPLOAD HANDLER (placeholder) */
+  /* ==========================================================
+     UPLOAD HANDLER (placeholder)
+  ========================================================== */
   const handleUploadClick = () => {
-    // This button is only visible if isLoggedIn === true
-    // Here you can open a file picker or a modal
-    alert("Upload image flow goes here (only for logged-in users).");
+    alert("Upload image flow goes here.");
     setShowMenu(false);
   };
 
+  /* ==========================================================
+     UI
+  ========================================================== */
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#faf4ef] via-[#f7f0e8] to-[#f3ece3] text-slate-800 flex flex-col">
       {/* HEADER */}
       <header className="w-full border-b border-[#e4d6c6] bg-[#fdf7f0]/80 backdrop-blur-sm">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+          {/* TITLE */}
           <div className="flex items-center gap-3">
             <motion.div
               animate={{ y: [0, -2, 0] }}
@@ -210,12 +255,12 @@ export default function KalyuughChat() {
                 Oracle of Kalyuugh
               </h1>
               <p className="text-xs text-[#8f6f5a]">
-                A gentle place for introspection, karma, paap & dharma.
+                A gentle space for karma, paap & dharma.
               </p>
             </div>
           </div>
 
-          {/* LANGUAGE SWITCHER */}
+          {/* LANGUAGE SWITCH */}
           <div className="flex flex-col items-end gap-1">
             <label className="text-[10px] uppercase tracking-wide text-[#9b816f]">
               Language
@@ -238,6 +283,7 @@ export default function KalyuughChat() {
       {/* CHAT AREA */}
       <main className="flex-1 flex justify-center px-3 py-4">
         <div className="w-full max-w-3xl bg-[#fefaf5] border border-[#e4d6c6] rounded-2xl shadow-sm flex flex-col overflow-hidden">
+          
           {/* MESSAGES */}
           <div className="flex-1 px-4 pt-4 pb-2 space-y-4 overflow-y-auto">
             {messages.map(m => (
@@ -246,12 +292,12 @@ export default function KalyuughChat() {
             <div ref={bottomRef} />
           </div>
 
-          {/* DIVIDER */}
+          {/* INPUT AREA */}
           <div className="h-px bg-gradient-to-r from-transparent via-[#e4d6c6] to-transparent" />
 
-          {/* INPUT BAR */}
           <div className="px-4 py-3 flex items-end gap-3 bg-[#fdf7f0] relative">
-            {/* PLUS + UPWARD MENU */}
+
+            {/* MENU */}
             <div className="relative">
               <button
                 onClick={() => setShowMenu(prev => !prev)}
@@ -277,6 +323,7 @@ export default function KalyuughChat() {
                         Upload Image
                       </button>
                     )}
+
                     <button
                       onClick={newChat}
                       className="text-xs text-left text-[#5a3a2b] px-2 py-1.5 rounded-lg hover:bg-[#f5ebe0] transition"
@@ -300,7 +347,7 @@ export default function KalyuughChat() {
                   sendMessage();
                 }
               }}
-              placeholder="Share your reflections, thoughts, or confessions…"
+              placeholder="Share your reflections or confessions…"
               className="flex-1 resize-none bg-white border border-[#e2d3c3] rounded-xl px-3 py-2 text-sm text-[#5a3a2b] placeholder:text-[#b89a84] focus:outline-none focus:ring-1 focus:ring-[#d4b489] max-h-32"
             />
 
@@ -314,7 +361,7 @@ export default function KalyuughChat() {
           </div>
 
           <p className="px-4 pb-3 text-[10px] text-[#b39378] text-right">
-            Enter to send • Shift+Enter for new line • Kalyuugh guides, never judges.
+            Enter to send • Shift+Enter for new line • Kalyuugh guides gently.
           </p>
         </div>
       </main>
@@ -322,7 +369,9 @@ export default function KalyuughChat() {
   );
 }
 
-/* ============== CHAT BUBBLE COMPONENT ============== */
+/* ==========================================================
+   CHAT BUBBLE
+========================================================== */
 function ChatBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === "user";
 
@@ -331,10 +380,11 @@ function ChatBubble({ msg }: { msg: Message }) {
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${isUser
+        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+          isUser
             ? "bg-white border border-[#e0d3c5] text-[#4b3a2c]"
             : "bg-[#fbf1e4] border border-[#e1c8aa] text-[#4b3522]"
-          }`}
+        }`}
       >
         {msg.content}
       </motion.div>

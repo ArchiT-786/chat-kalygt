@@ -3,51 +3,37 @@ import { embedText } from "@/lib/embed";
 
 export const runtime = "nodejs";
 
-async function delay(ms: number) {
-  return new Promise(res => setTimeout(res, ms));
-}
-
 export async function POST(req: Request) {
   try {
     const { question, answer } = await req.json();
 
     if (!question || !answer) {
-      console.warn("Missing question or answer. Skipping store.");
+      console.warn("⚠ Missing Q/A — skipping.");
       return Response.json({ ok: false });
     }
 
-    console.log("📝 Storing chat → Pinecone...");
-    console.log("Question:", question.slice(0, 60));
-    console.log("Answer length:", answer.length);
+    console.log("📝 Storing chat → Pinecone (mapped pair)");
 
-    const qVec = await embedText(question);
-    const aVec = await embedText(answer);
+    // Create a single text chunk containing question + answer
+    const combinedText = `Q: ${question}\nA: ${answer}`;
+    const embedding = await embedText(combinedText);
 
     const id = Date.now().toString();
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        await pineconeIndex.upsert([
-          {
-            id: `q-${id}`,
-            values: qVec,
-            metadata: { text: question, role: "user", timestamp: id },
-          },
-          {
-            id: `a-${id}`,
-            values: aVec,
-            metadata: { text: answer, role: "assistant", timestamp: id },
-          },
-        ]);
+    await pineconeIndex.upsert([
+      {
+        id,
+        values: embedding,
+        metadata: {
+          question,
+          answer,
+          role: "chat_pair",
+          timestamp: id,
+        },
+      },
+    ]);
 
-        console.log("✅ Pinecone upsert success");
-        break;
-      } catch (err) {
-        console.error(`❌ Upsert failed (attempt ${attempt}):`, err);
-        if (attempt === 3) throw err;
-        await delay(300 * attempt);
-      }
-    }
+    console.log("✅ Pinecone upsert success");
 
     return Response.json({ ok: true });
   } catch (err) {
