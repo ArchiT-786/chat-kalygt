@@ -9,7 +9,7 @@ import { chatStore } from "@/lib/chatStore";
 import { ChatMessage } from "@/lib/db";
 
 /* =======================================================
-   MAIN CHAT PAGE WITH MULTI-CHAT SUPPORT
+   MAIN CHAT PAGE WITH MULTI-CHAT + SUPPORT QR
 ======================================================= */
 export default function KalyuughChatPage() {
   const [conversations, setConversations] = useState<any[]>([]);
@@ -30,7 +30,6 @@ export default function KalyuughChatPage() {
     chatStore.listConversations().then((convs) => {
       setConversations(convs);
 
-      // Auto-load the first conversation or create one
       if (convs.length > 0) {
         setCurrentConversationId(convs[0].id);
       } else {
@@ -51,7 +50,7 @@ export default function KalyuughChatPage() {
           id: nanoid(),
           role: "assistant",
           content:
-            "🌸 **Welcome, seeker.** What truth weighs upon your heart today?",
+            "🌸 **Welcome, seeker.** The Oracle of Kalyuugh listens… What truth weighs upon your heart today?",
           createdAt: Date.now(),
           conversationId: currentConversationId,
         };
@@ -64,7 +63,7 @@ export default function KalyuughChatPage() {
   }, [currentConversationId]);
 
   /* =======================================================
-     SCROLL TO BOTTOM
+     AUTO SCROLL
   ======================================================== */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -97,7 +96,6 @@ export default function KalyuughChatPage() {
     chatStore.addMessage(userMsg);
     setInput("");
 
-    // Create assistant placeholder
     const assistantId = nanoid();
     const placeholder: ChatMessage = {
       id: assistantId,
@@ -113,7 +111,7 @@ export default function KalyuughChatPage() {
     const res = await fetch("/api/chat", {
       method: "POST",
       body: JSON.stringify({
-        messages: [{ role: "user", content: userMsg.content }], // only latest msg
+        messages: [{ role: "user", content: userMsg.content }],
         language,
         conversationId: currentConversationId,
       }),
@@ -145,7 +143,7 @@ export default function KalyuughChatPage() {
       conversationId: currentConversationId,
     });
 
-    // Store to Pinecone (mapped)
+    // Store into Pinecone (ONLY ON BACKEND, NO FRONTEND DUPLICATE)
     // fetch("/api/store-chat", {
     //   method: "POST",
     //   body: JSON.stringify({
@@ -157,7 +155,7 @@ export default function KalyuughChatPage() {
   }
 
   /* =======================================================
-     RENAME CURRENT CONVERSATION
+     RENAME CONVERSATION
   ======================================================== */
   function startRename() {
     const conv = conversations.find((c) => c.id === currentConversationId);
@@ -178,7 +176,6 @@ export default function KalyuughChatPage() {
   ======================================================== */
   async function deleteConversation(id: string) {
     await chatStore.deleteConversation(id);
-
     const newList = await chatStore.listConversations();
     setConversations(newList);
 
@@ -190,11 +187,11 @@ export default function KalyuughChatPage() {
   }
 
   /* =======================================================
-     UI RENDER
+     UI LAYOUT
   ======================================================== */
   return (
     <div className="flex min-h-screen bg-[#f7f0e8]">
-      {/* ============================ SIDEBAR ============================= */}
+      {/* ====================== SIDEBAR ====================== */}
       <aside className="w-64 border-r border-[#e4d6c6] bg-[#faf4ef] p-4 flex flex-col gap-4">
 
         <button
@@ -246,9 +243,9 @@ export default function KalyuughChatPage() {
         </div>
       </aside>
 
-      {/* ============================ CHAT AREA ============================ */}
+      {/* ====================== MAIN CHAT ====================== */}
       <main className="flex-1 flex flex-col">
-        {/* HEADER TITLE */}
+        {/* HEADER */}
         <header className="p-4 border-b border-[#e4d6c6] bg-[#fdf7f0] flex justify-between">
           {editingTitle ? (
             <div className="flex gap-2">
@@ -273,13 +270,47 @@ export default function KalyuughChatPage() {
 
         {/* MESSAGES */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#fefaf5]">
-          {messages.map((msg) => (
-            <ChatBubble key={msg.id} msg={msg} />
+          {messages.map((msg, index) => (
+            <div key={msg.id}>
+              <ChatBubble msg={msg} />
+
+              {/* SUPPORT QR */}
+              {index === 0 && msg.role === "assistant" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6 }}
+                  className="mt-4 flex justify-center"
+                >
+                  <div className="bg-[#fdf7f0] border border-[#e4d6c6] rounded-2xl shadow-sm p-4 w-[260px] text-center">
+                    <p className="text-sm text-[#5a3a2b] font-medium mb-2">
+                      🙏 A gentle request, seeker…
+                    </p>
+
+                    <p className="text-xs text-[#8f6f5a] mb-3 leading-relaxed">
+                      If the Oracle’s words guide your path,<br />
+                      you may leave an offering of kindness.<br />
+                      It keeps this sacred fire glowing in Kalyuugh.
+                    </p>
+
+                    <img
+                      src="/support-qr.png"
+                      alt="Support the Oracle"
+                      className="w-36 h-36 mx-auto rounded-md border border-[#d8c8b5]"
+                    />
+
+                    <p className="text-[11px] mt-2 text-[#8f6f5a]">
+                      Scan to support the creator ❤️
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </div>
           ))}
           <div ref={bottomRef} />
         </div>
 
-        {/* INPUT BAR */}
+        {/* INPUT */}
         <div className="p-3 border-t border-[#e4d6c6] bg-[#fdf7f0] flex items-end gap-3">
           <textarea
             ref={inputRef}
@@ -293,7 +324,7 @@ export default function KalyuughChatPage() {
               }
             }}
             className="flex-1 resize-none bg-white border border-[#e2d3c3] rounded-xl px-3 py-2 text-sm text-[#5a3a2b]"
-            placeholder="Ask the Oracle of Kalyuugh..."
+            placeholder="Ask the Oracle of Kalyuugh…"
           />
 
           <button
