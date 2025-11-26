@@ -3,7 +3,6 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRef } from "react";
-import AnimatedClickHereButton from "@/components/MotionButton";
 
 export default function LandingPage() {
   const buttonRef = useRef<HTMLDivElement | null>(null);
@@ -102,9 +101,15 @@ export default function LandingPage() {
       {/* CTA BUTTON */}
       <motion.div
         ref={buttonRef}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5, duration: 1.4 }}
+        animate={{
+          y: [0, -10, 0], // bounce cycle
+        }}
+        transition={{
+          duration: 1.2,
+          repeat: Infinity,
+          repeatType: "loop",
+          ease: "easeInOut",
+        }}
         className="mt-12 z-20"
       >
         <Link
@@ -115,7 +120,6 @@ export default function LandingPage() {
           ENTER INTO THE EXISTENCE
         </Link>
       </motion.div>
-      <AnimatedClickHereButton/>
       <section className="max-w-3xl mx-auto mt-16 text-center text-[#7c6450]">
         <h2 className="text-xl font-semibold mb-4">About Kalyuugh</h2>
         <p className="text-sm leading-relaxed">
